@@ -1,339 +1,196 @@
 """
-Quant Black Box — HMM Regime Detector (ported from algo-trading-bot).
-
-Uses a Gaussian HMM with 3 states (Bull, Bear, Sideways) trained via
-Baum-Welch (EM) on a rolling lookback window.  Viterbi decoding
-produces regime probabilities for the latest observation.
+HMM Regime Detection — 3-state Gaussian HMM
+Detects Bull/Bear/Sideways regimes using log returns, volatility, volume ratio.
 """
-
-from __future__ import annotations
-
-import logging
-from typing import Any, Dict, List, Optional, Tuple
-
 import numpy as np
 import pandas as pd
-
-from config import settings
-
-logger = logging.getLogger(__name__)
-
-try:
-    from hmmlearn import hmm
-
-    HMMLEARN_AVAILABLE = True
-except ImportError:
-    HMMLEARN_AVAILABLE = False
-
-
-# ── Regime Labels ──────────────────────────────────────────────────────────
-
-REGIME_LABELS = {
-    0: "Bull/Trending",
-    1: "Bear/Declining",
-    2: "Sideways/Chop",
-}
-
-REGIME_COMPATIBLE_STRATEGIES: dict[str, set[str]] = {
-    "Bull/Trending": {"momentum", "carry"},
-    "Bear/Declining": {"mean_reversion"},
-    "Sideways/Chop": {"mean_reversion"},
-}
-
-# Also track volatility regime separately
-VOL_LABELS = {"high": "HighVol", "low": "LowVol"}
-
-# Strategy → allowed regimes
-STRATEGY_REGIME_MAP: dict[str, set[str]] = {
-    "momentum": {"Bull/Trending"},
-    "mean_reversion": {"Sideways/Chop", "Bear/Declining"},
-    "carry": {"Bull/Trending", "LowVol"},
-    "volatility": {"HighVol"},
-    "pairs": {"Sideways/Chop"},
-}
-
-
-def _compute_features(df: pd.DataFrame) -> np.ndarray:
-    """Build the observation matrix from OHLCV data.
-
-    Features:
-      0. Log returns
-      1. Realized volatility (20-period rolling std of log returns)
-      2. Volume ratio (current / 20-period rolling mean volume)
-    """
-    close = df["Close"].astype(float).values
-    volume = df["Volume"].astype(float).values
-
-    log_returns = np.log(close[1:] / close[:-1])
-
-    returns_series = pd.Series(log_returns)
-    realized_vol = returns_series.rolling(window=20, min_periods=5).std().values
-
-    volume_series = pd.Series(volume)
-    vol_mean = volume_series.rolling(window=20, min_periods=5).mean()
-    vol_ratio = np.where(
-        (vol_mean.iloc[1:].values > 0) & np.isfinite(vol_mean.iloc[1:].values),
-        volume[1:] / vol_mean.iloc[1:].values,
-        1.0,
-    )
-
-    pad_len = len(close) - 1
-    log_ret_pad = np.concatenate([[0.0], log_returns])
-    vol_pad = np.concatenate([[0.0], realized_vol])
-    vr_pad = np.concatenate([[1.0], vol_ratio])
-
-    features = np.column_stack([log_ret_pad, vol_pad, vr_pad])
-    features = np.where(np.isfinite(features), features, 0.0)
-
-    return features
+from typing import Dict, Any, Optional
 
 
 class RegimeDetector:
-    """HMM regime detector for market data."""
+    """3-state Gaussian HMM for regime detection.
 
-    def __init__(
-        self,
-        n_states: int = 3,
-        lookback_days: int = 90,
-        confidence_threshold: float = 0.60,
-        features: Optional[List[str]] = None,
-    ):
-        self.n_states = max(n_states, 3)
-        self.lookback_days = lookback_days
-        self.confidence_threshold = confidence_threshold
-        self.features = features or [
-            "log_returns",
-            "realized_vol",
-            "volume_ratio",
-        ]
+    States: Bull, Bear, Sideways
+    Features: log returns, rolling volatility, volume ratio
+    Training: Baum-Welch (EM) on rolling window
+    Inference: Viterbi decoding for current regime
+    """
 
-        self.model: Optional[Any] = None
-        self._trained: bool = False
-        self._feature_mean: Optional[np.ndarray] = None
-        self._feature_std: Optional[np.ndarray] = None
-        self._regime_history: List[Tuple[int, float]] = []
+    STATE_NAMES = {0: "bull", 1: "bear", 2: "chop"}
 
-    # ── Training ──────────────────────────────────────────────────────────
+    def __init__(self, n_states: int = 3, n_features: int = 3):
+        self.n_states = n_states
+        self.n_features = n_features
+        self.model = None
+        self.is_trained = False
 
-    def train(self, df: pd.DataFrame) -> bool:
-        """Fit the HMM on the provided OHLCV dataframe."""
-        if not HMMLEARN_AVAILABLE:
-            logger.warning("hmmlearn not installed — training skipped")
-            return False
+    def _extract_features(self, df: pd.DataFrame) -> np.ndarray:
+        """Extract regime features from OHLCV data.
 
-        if len(df) > self.lookback_days:
-            train_data = df.tail(self.lookback_days)
+        Features:
+        1. Log returns (normalized)
+        2. Realized volatility (20-period rolling)
+        3. Volume ratio (current/20-day avg)
+        """
+        if df is None or len(df) < 60:
+            return np.zeros((1, self.n_features))
+
+        # Log returns
+        log_returns = np.log(df['Close'] / df['Close'].shift(1)).dropna()
+
+        # Realized volatility (20-period rolling std)
+        vol_20 = df['Close'].pct_change().rolling(20).std().dropna()
+
+        # Volume ratio
+        vol_avg_20 = df['Volume'].rolling(20).mean()
+        vol_ratio = df['Volume'] / vol_avg_20
+
+        # Combine features
+        features = np.column_stack([
+            log_returns.values[:len(vol_ratio)],
+            vol_20.values,
+            vol_ratio.values,
+        ])
+
+        # Normalize
+        if features.shape[0] > 0:
+            mean = features.mean(axis=0)
+            std = features.std(axis=0) + 1e-8
+            features = (features - mean) / std
+
+        return features
+
+    def detect(self, asset: str, df: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
+        """Detect the current regime for an asset.
+
+        Returns dict with:
+        - regime: str (state name)
+        - probabilities: dict (state -> probability)
+        - confidence: float (max probability)
+        """
+        if not self.is_trained or df is None:
+            return {
+                "regime": "UNKNOWN",
+                "probabilities": {},
+                "confidence": 0.0,
+            }
+
+        # Get last feature vector
+        features = self._extract_features(df)
+        if features.shape[0] == 0:
+            return {"regime": "UNKNOWN", "probabilities": {}, "confidence": 0.0}
+
+        try:
+            # Viterbi decoding
+            state_sequence = self.model.predict(features)
+            # State probabilities
+            prob_matrix = self.model.predict_proba(features)
+
+            current_state = state_sequence[-1]
+            current_probs = prob_matrix[-1]
+
+            state_names = self.STATE_NAMES.get(current_state, f"state_{current_state}")
+
+            return {
+                "regime": state_names,
+                "probabilities": {
+                    name: float(prob)
+                    for name, prob in zip(
+                        [f"state_{i}" for i in range(self.n_states)],
+                        current_probs,
+                    )
+                },
+                "confidence": float(np.max(current_probs)),
+                "state_index": int(current_state),
+            }
+        except Exception:
+            return {
+                "regime": "UNKNOWN",
+                "probabilities": {},
+                "confidence": 0.0,
+            }
+
+    def train(self, df: pd.DataFrame, lookback_days: int = 90) -> Dict[str, Any]:
+        """Train the HMM model on data.
+
+        Args:
+            df: OHLCV DataFrame
+            lookback_days: Lookback window for training
+
+        Returns:
+            Dict with training results
+        """
+        if df is None or len(df) < 60:
+            return {"states": 0, "status": "failed", "reason": "insufficient_data"}
+
+        # Use last N lookback days
+        if len(df) > lookback_days:
+            train_data = df.tail(lookback_days)
         else:
             train_data = df
 
-        min_samples = 3 * self.n_states
-        if len(train_data) < min_samples:
-            return False
+        features = self._extract_features(train_data)
 
-        X = _compute_features(train_data)
-        nonzero_cols = np.any(np.abs(X) > 1e-10, axis=0)
-        X = X[:, nonzero_cols]
-
-        if X.shape[0] < 10:
-            return False
-
-        best_model = None
-        best_score = float("inf")
-
-        for retry in range(3):
-            try:
-                model_candidate = hmm.GaussianHMM(
-                    n_components=self.n_states,
-                    covariance_type="diag",
-                    n_iter=150,
-                    min_covar=1e-4,
-                    means_prior=0,
-                    means_weight=0,
-                    covars_prior=1e-2,
-                    covars_weight=1,
-                    tol=1e-2,
-                    verbose=False,
-                )
-                mean = X.mean(axis=0)
-                std = X.std(axis=0)
-                std[std < 1e-8] = 1.0
-                X_scaled = (X - mean) / std
-
-                model_candidate.fit(X_scaled)
-                score = model_candidate.score(X_scaled)
-                if score < best_score:
-                    best_score = score
-                    best_model = model_candidate
-                if abs(score) < 1e3:
-                    break
-            except Exception:
-                continue
-
-        if best_model is None:
-            return False
-
-        self.model = best_model
-        self._feature_mean = mean
-        self._feature_std = std
+        if features.shape[0] < 10:
+            return {"states": 0, "status": "failed", "reason": "insufficient_features"}
 
         try:
-            X_scaled = (X - mean) / std
-            _, states = self.model.predict(X_scaled)
-            _, probs = self.model.predict_proba(X_scaled)
-            self._regime_history = [
-                (int(s), float(p[s])) for s, p in zip(states, probs)
-            ]
-        except Exception:
-            pass
+            from hmmlearn import hmm
 
-        self._trained = True
-        return True
+            self.model = hmm.GaussianHMM(
+                n_components=self.n_states,
+                covariance_type="full",
+                n_iter=100,
+                random_state=42,
+            )
+            self.model.fit(features)
+            self.is_trained = True
 
-    # ── Inference ─────────────────────────────────────────────────────────
+            # Label states based on emission means
+            state_names = self._label_states(features)
 
-    def get_regime(self, df: pd.DataFrame) -> Tuple[str, Dict[str, float], float]:
-        """Return the current market regime and probabilities."""
-        if not self._trained or self.model is None:
-            self.train(df)
+            return {
+                "states": self.n_states,
+                "status": "trained",
+                "state_names": state_names,
+                "log_likelihood": float(self.model.score(features)),
+            }
+        except ImportError:
+            return {
+                "states": 0,
+                "status": "failed",
+                "reason": "hmmlearn not installed (pip install hmmlearn)",
+            }
+        except Exception as e:
+            return {
+                "states": 0,
+                "status": "failed",
+                "reason": str(e),
+            }
 
-        if not self._trained:
-            return "Unknown", {"Unknown": 1.0}, 1.0
+    def _label_states(self, features: np.ndarray) -> Dict[int, str]:
+        """Label HMM states based on emission means.
 
-        X_latest = _compute_features(df)
-        if X_latest.shape[0] == 0:
-            return "Unknown", {"Unknown": 1.0}, 1.0
-
-        if self._feature_std is not None:
-            X_infer = (X_latest[-1:] - self._feature_mean) / self._feature_std
-        else:
-            X_infer = X_latest[-1:].reshape(1, -1)
-
-        states = self.model.predict(X_infer)
-        posteriors = self.model.predict_proba(X_infer)
-
-        state_idx = int(states[0])
-        posteriors_flat = posteriors[0]
-
-        labeled_probs = self._label_regime_states(posteriors_flat, state_idx)
-        dominant_label = max(labeled_probs, key=labeled_probs.get)
-        confidence = labeled_probs[dominant_label]
-
-        return dominant_label, labeled_probs, confidence
-
-    def get_regime_for_backtest(
-        self, df: pd.DataFrame, start_idx: int
-    ) -> Tuple[str, Dict[str, float], float]:
-        """Decode regime at a specific historical index."""
-        if not self._trained or self.model is None:
-            self.train(df)
-
-        if not self._trained:
-            return "Unknown", {"Unknown": 1.0}, 1.0
-
-        X = _compute_features(df)
-        if self._feature_std is not None:
-            X_scaled = (X - self._feature_mean) / self._feature_std
-        else:
-            X_scaled = X
-
-        states_all = self.model.predict(X_scaled)
-        probs_all = self.model.predict_proba(X_scaled)
-
-        idx = min(start_idx, len(states_all) - 1)
-        state_idx = int(states_all[idx])
-        posteriors_flat = probs_all[idx]
-
-        labeled_probs = self._label_regime_states(posteriors_flat, state_idx)
-        dominant_label = max(labeled_probs, key=labeled_probs.get)
-        confidence = labeled_probs[dominant_label]
-
-        return dominant_label, labeled_probs, confidence
-
-    # ── Helpers ───────────────────────────────────────────────────────────
-
-    def _label_regime_states(
-        self, posteriors: np.ndarray, dominant_idx: int
-    ) -> Dict[str, float]:
-        """Assign semantic labels to HMM states."""
+        States are labeled based on the mean of the log-return feature:
+        - High mean return → Bull
+        - Low/negative mean return → Bear
+        - Near-zero mean return → Chop
+        """
         if self.model is None:
-            return {label: 1.0 / self.n_states for label in REGIME_LABELS.values()}
+            return {}
 
-        n = self.model.n_components
-        try:
-            means = self.model.means_
-        except AttributeError:
-            return {label: 1.0 / self.n_states for label in REGIME_LABELS.values()}
+        means = self.model.means_
 
-        if means.shape[1] >= 1:
-            sorted_order = np.argsort(means[:, 0])[::-1]
-        else:
-            sorted_order = np.arange(n)
+        labeled = {}
+        for i in range(self.n_states):
+            mean_return = means[i][0]  # First feature is log returns
 
-        labeled_probs: Dict[str, float] = {}
-        for rank, state_idx in enumerate(sorted_order):
-            if rank == 0 and n >= 1:
-                label = "Bull/Trending"
-            elif rank == n - 1 and n >= 2:
-                label = "Bear/Declining"
+            if mean_return > 0.05:
+                labeled[i] = "bull"
+            elif mean_return < -0.05:
+                labeled[i] = "bear"
             else:
-                label = "Sideways/Chop"
-            labeled_probs[label] = float(posteriors[state_idx])
+                labeled[i] = "chop"
 
-        for label in ["Bull/Trending", "Bear/Declining", "Sideways/Chop"]:
-            if label not in labeled_probs:
-                labeled_probs[label] = 0.0
-
-        return labeled_probs
-
-    def get_vol_regime(self, df: pd.DataFrame) -> str:
-        """Classify volatility regime (HighVol / LowVol)."""
-        if len(df) < 21:
-            return "LowVol"
-
-        close = df["Close"].astype(float).values
-        returns = np.log(close[1:] / close[:-1])
-        recent_vol = pd.Series(returns).rolling(20, min_periods=5).std()
-
-        if len(recent_vol) == 0:
-            return "LowVol"
-
-        current_vol = recent_vol.iloc[-1]
-        avg_vol = recent_vol.mean()
-
-        if np.isnan(current_vol) or np.isnan(avg_vol) or avg_vol == 0:
-            return "LowVol"
-
-        return "HighVol" if current_vol > avg_vol * 1.2 else "LowVol"
-
-    def retrain_with_window(
-        self, df: pd.DataFrame, warmup_bars: int = 60
-    ) -> bool:
-        """Retrain on the last lookback_days bars if enough data."""
-        if len(df) < warmup_bars:
-            return False
-        return self.train(df)
-
-    def should_fire(
-        self, strategy_name: str, regime: str, confidence: float
-    ) -> bool:
-        """Check if a strategy should fire under current regime."""
-        if confidence < self.confidence_threshold:
-            return False
-
-        allowed = STRATEGY_REGIME_MAP.get(strategy_name, set())
-        if not allowed:
-            return True  # Unknown strategy — passthrough
-        return regime in allowed
-
-
-# ── Convenience ─────────────────────────────────────────────────────────────
-
-def get_detector(**overrides) -> RegimeDetector:
-    """Create a RegimeDetector from settings (with optional overrides)."""
-    return RegimeDetector(
-        n_states=overrides.get("n_states", settings.regime_n_states),
-        lookback_days=overrides.get("lookback_days", settings.regime_lookback_days),
-        confidence_threshold=overrides.get(
-            "confidence_threshold", settings.regime_confidence_threshold
-        ),
-    )
+        self.STATE_NAMES = labeled
+        return labeled

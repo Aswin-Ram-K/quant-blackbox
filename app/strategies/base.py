@@ -95,3 +95,12 @@ class StrategyBase:
 
     def __repr__(self) -> str:
         return f"<Strategy {self.name}>"
+
+    def __init_subclass__(cls, **kwargs):
+        """Auto-register any StrategyBase subclass on definition."""
+        try:
+            from app.strategies.registry import register_strategy
+            if hasattr(cls, "name") and cls.name:
+                register_strategy(cls())
+        except ImportError:
+            pass  # Registry not yet loaded

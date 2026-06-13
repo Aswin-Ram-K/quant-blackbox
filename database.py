@@ -1,33 +1,24 @@
 """
-Quant Black Box — Database engine & session factory.
-
-Uses SQLAlchemy 2.0 with sync engine (SQLite).  The ``get_db`` dependency
-yields an ``AsyncSession``-compatible context manager via ``Session``.
+SQLite Database Setup — SQLAlchemy 2.0
 """
-
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import sessionmaker, declarative_base
+from app.config import settings
 
-from config import settings
-
-engine = create_engine(
-    settings.database_url,
-    connect_args={"check_same_thread": False},  # SQLite only
-)
-
+engine = create_engine(settings.DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
 
 
-def get_db() -> Session:
-    """Dependency for FastAPI route injection."""
+def init_db():
+    """Create all tables."""
+    Base.metadata.create_all(bind=engine)
+
+
+def get_db():
+    """FastAPI dependency: provide a DB session."""
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
-
-
-def init_db():
-    """Create all tables. Call on app startup."""
-    from app.models import Base  # noqa: F401 — models must be imported
-    Base.metadata.create_all(bind=engine)
