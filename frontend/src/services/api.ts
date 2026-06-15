@@ -1,132 +1,51 @@
-import type {
-  BacktestRequest,
-  BacktestResponse,
-  PaperTradeRequest,
-  PaperTradeResponse,
-  PortfolioState,
-  RegimeResult,
-  StrategyInfo,
-  AnalyticsMetrics,
-  DataSources,
-  FetchedData,
-  HealthCheck,
-} from '@/types'
+const API = '/api/v1'
 
-const API_BASE = import.meta.env.VITE_API_URL || '/api/v1'
-
-async function request<T>(
-  endpoint: string,
-  options?: RequestInit
-): Promise<T> {
-  const url = `${API_BASE}${endpoint}`
-  const res = await fetch(url, {
+async function fetchJson<T>(endpoint: string, opts?: RequestInit): Promise<T> {
+  const res = await fetch(`${API}${endpoint}`, {
     headers: { 'Content-Type': 'application/json' },
-    ...options,
+    ...opts,
   })
-
-  if (!res.ok) {
-    const error = await res.text().catch(() => res.statusText)
-    throw new Error(`API Error ${res.status}: ${error}`)
-  }
-
   if (res.status === 204) return {} as T
+  if (!res.ok) throw new Error(`API ${res.status}: ${res.statusText}`)
   return res.json()
 }
 
-// ─── Health ────────────────────────────────────────────────────────────
-
-export async function getHealth(): Promise<HealthCheck> {
-  return request('/health')
+export async function listStrategies() {
+  try { return await fetchJson<any[]>(`${API}/strategies/`) }
+  catch { return [] }
 }
 
-// ─── Strategies ────────────────────────────────────────────────────────
-
-export async function listStrategies(): Promise<StrategyInfo[]> {
-  return request(`${API_BASE}/strategies/`)
+export async function runBacktest(payload: any) {
+  try { return await fetchJson<any>(`${API}/backtest/run`, { method: 'POST', body: JSON.stringify(payload) }) }
+  catch { return null }
 }
 
-export async function getStrategy(name: string): Promise<StrategyInfo> {
-  return request(`${API_BASE}/strategies/${name}`)
+export async function fetchMarketData(asset: string, days: number = 90) {
+  try { return await fetchJson<any>(`${API}/data/fetch?asset=${asset}&days=${days}`, { method: 'POST', body: JSON.stringify({ asset, days }) }) }
+  catch { return null }
 }
 
-export async function registerStrategy(
-  payload: { name: string; description: string; parameters: Record<string, any>; markets: string[]; timeframes: string[]; tier: string }
-): Promise<StrategyInfo> {
-  return request(`${API_BASE}/strategies`, {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  })
+export async function getHealth() {
+  try { return await fetchJson<any>(`${API}/health`) }
+  catch { return null }
 }
 
-// ─── Backtest ──────────────────────────────────────────────────────────
-
-export async function runBacktest(payload: BacktestRequest): Promise<BacktestResponse> {
-  return request(`${API_BASE}/backtest/run`, {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  })
+export async function getCurrentRegime(asset: string) {
+  try { return await fetchJson<any>(`${API}/regime/current/${asset}`) }
+  catch { return null }
 }
 
-export async function getBacktestResult(id: string): Promise<BacktestResponse> {
-  return request(`${API_BASE}/backtest/${id}/results`)
+export async function listDataSources() {
+  try { return await fetchJson<any>(`${API}/data/sources`) }
+  catch { return null }
 }
 
-// ─── Paper Trading ─────────────────────────────────────────────────────
-
-export async function startPaperTrading(): Promise<{ status: string }> {
-  return request(`${API_BASE}/live/start`, { method: 'POST' })
+export async function placeOrder(payload: any) {
+  try { return await fetchJson<any>(`${API}/live/order`, { method: 'POST', body: JSON.stringify(payload) }) }
+  catch { return null }
 }
 
-export async function placePaperOrder(payload: PaperTradeRequest): Promise<PaperTradeResponse> {
-  return request(`${API_BASE}/live/order`, {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  })
-}
-
-export async function getPortfolio(): Promise<PortfolioState> {
-  return request(`${API_BASE}/live/portfolio`)
-}
-
-// ─── Analytics ─────────────────────────────────────────────────────────
-
-export async function getMetrics(backtestId: string): Promise<AnalyticsMetrics> {
-  return request(`${API_BASE}/analytics/metrics/${backtestId}`)
-}
-
-export async function compareBacktests(ids: string[]): Promise<any> {
-  return request(`${API_BASE}/analytics/compare?ids=${ids.join(',')}`)
-}
-
-// ─── Data ──────────────────────────────────────────────────────────────
-
-export async function listDataSources(): Promise<DataSources> {
-  return request(`${API_BASE}/data/sources`)
-}
-
-export async function fetchMarketData(
-  asset: string,
-  timeframe: string = '1D',
-  days: number = 365
-): Promise<FetchedData> {
-  return request(`${API_BASE}/data/fetch?asset=${asset}&timeframe=${timeframe}&days=${days}`, {
-    method: 'POST',
-    body: JSON.stringify({ asset, timeframe, days }),
-  })
-}
-
-// ─── Regime ────────────────────────────────────────────────────────────
-
-export async function getCurrentRegime(asset: string): Promise<RegimeResult> {
-  return request(`${API_BASE}/regime/current/${asset}`)
-}
-
-export async function trainRegimeModel(
-  asset: string,
-  lookbackDays: number = 90
-): Promise<any> {
-  return request(`${API_BASE}/regime/train`, {
-    method: 'POST',
-    body: JSON.stringify({ asset, lookback_days: lookbackDays }),
-  })
+export async function getPortfolio() {
+  try { return await fetchJson<any>(`${API}/live/portfolio`) }
+  catch { return null }
 }

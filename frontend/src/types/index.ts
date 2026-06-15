@@ -1,4 +1,4 @@
-// ─── API Response Types ─────────────────────────────────────────────────
+// ── API Types ───────────────────────────────────────────────────────────
 
 export interface StrategyInfo {
   name: string
@@ -9,62 +9,37 @@ export interface StrategyInfo {
   tier: 'long-term' | 'swing' | 'intraday'
 }
 
-export interface StrategyRegisterRequest {
-  name: string
-  description: string
-  parameters: Record<string, any>
-  markets: string[]
-  timeframes: string[]
-  tier: string
-}
-
-export interface BacktestRequest {
-  strategy_name: string
-  asset: string
-  timeframe: string
-  start_date: string
-  end_date: string
-  initial_capital: number
-  risk_per_trade: number
-  params: Record<string, any>
-}
-
-export interface BacktestResponse {
-  id: string
-  status: string
-  metrics: Record<string, any>
-  equity_curve: number[]
-  trades: Trade[]
-  regime_breakdown: Record<string, any>
-}
-
 export interface Trade {
-  entry_date: string
-  exit_date: string
+  id: string
+  date: string
+  strategy: string
+  phase: string
   symbol: string
+  side: 'buy' | 'sell'
   quantity: number
   entry_price: number
   exit_price: number
   pnl: number
   pnl_pct: number
+  trigger: string
+  reason: string
+  outcome: 'good' | 'bad' | 'mixed'
+  notes: string
   regime: string
+  metadata: Record<string, any>
 }
 
-export interface PaperTradeRequest {
-  symbol: string
-  quantity: number
-  side: 'buy' | 'sell'
-  order_type: 'market' | 'limit' | 'stop'
-  limit_price?: number
-  stop_loss?: number
-}
-
-export interface PaperTradeResponse {
-  order_id: string
+export interface BacktestResult {
+  id: string
+  strategy: string
+  asset: string
+  start_date: string
+  end_date: string
   status: string
-  symbol: string
-  quantity: number
-  side: string
+  metrics: Record<string, number>
+  equity_curve: number[]
+  trades: Trade[]
+  regime_breakdown: Record<string, any>
 }
 
 export interface PortfolioState {
@@ -86,39 +61,10 @@ export interface Position {
 
 export interface RegimeResult {
   asset: string
-  regime: string
+  regime: 'bull' | 'bear' | 'chop' | 'unknown'
   probabilities: Record<string, number>
   confidence: number
   timestamp: string
-}
-
-export interface RegimeTrainRequest {
-  asset: string
-  lookback_days: number
-}
-
-export interface AnalyticsMetrics {
-  win_rate: number
-  profit_factor: number
-  max_drawdown: number
-  sharpe_ratio: number
-  sortino_ratio: number
-  recovery_time_days: number
-  avg_win_loss_ratio: number
-  trade_frequency: number
-  regime_fit: {
-    bull: number
-    bear: number
-    chop: number
-  }
-  improvement_score: number
-}
-
-export interface DataSources {
-  equities: Record<string, string>
-  crypto: Record<string, string>
-  forex: Record<string, string>
-  commodities: Record<string, string>
 }
 
 export interface HealthCheck {
@@ -134,24 +80,52 @@ export interface FetchedData {
   first_date: string | null
   last_date: string | null
   preview: Record<string, any>[]
+  ohlcv: { time: string; open: number; high: number; low: number; close: number; volume?: number }[]
 }
 
-// ─── Custom Types ───────────────────────────────────────────────────────
-
-export type Regime = 'bull' | 'bear' | 'chop' | 'unknown'
-
-export type MetricCard = {
-  name: string
-  value: string
-  label: string
-  threshold: string
-  status: 'pass' | 'warn' | 'fail'
-  trend?: 'up' | 'down' | 'flat'
+export interface DataSources {
+  equities: Record<string, string>
+  crypto: Record<string, string>
+  forex: Record<string, string>
+  commodities: Record<string, string>
 }
 
-export type NavItem = {
+// ── UI Types ────────────────────────────────────────────────────────────
+
+export interface NavItem {
   id: string
   label: string
   icon: string
-  path: string
+  shortLabel: string  // for mobile
+  color: string
+}
+
+export interface MetricItem {
+  label: string
+  value: string
+  status: 'pass' | 'warn' | 'fail' | 'neutral'
+  trend?: 'up' | 'down' | 'flat'
+  desc?: string
+}
+
+export interface ChatMessage {
+  id: string
+  role: 'user' | 'ai' | 'system'
+  content: string
+  timestamp: number
+  context?: Record<string, any>  // screen state when sent
+}
+
+export interface LogEntry {
+  id: string
+  strategy: string
+  period_start: string
+  period_end: string
+  trades: Trade[]
+  total_pnl: number
+  win_rate: number
+  description: string
+  triggers: string[]
+  analysis: string
+  grade: 'A' | 'A-' | 'B' | 'B-' | 'C' | 'C+' | 'D' | 'F'
 }

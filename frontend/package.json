@@ -1,7 +1,7 @@
 {
   "name": "quant-blackbox",
   "private": true,
-  "version": "0.1.0",
+  "version": "2.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,16 +9,15 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@tanstack/react-query": "^5.62.0",
-    "lightweight-charts": "^4.2.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.1.0",
-    "recharts": "^2.15.0",
+    "lightweight-charts": "^4.2.2",
     "zustand": "^5.0.0",
     "date-fns": "^4.1.0",
     "clsx": "^2.1.0",
-    "tailwind-merge": "^2.5.0"
+    "tailwind-merge": "^2.5.0",
+    "recharts": "^2.15.0"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",

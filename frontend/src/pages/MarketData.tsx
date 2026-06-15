@@ -1,240 +1,208 @@
 import { useState, useEffect } from 'react'
-import { listDataSources, fetchMarketData, getCurrentRegime } from '@/services/api'
-import type { FetchedData } from '@/types'
-import type { DataSources } from '@/types'
+import { useAppStore } from '@/store/appStore'
+import { listDataSources, fetchMarketData } from '@/services/api'
 import CandlestickChart from '@/components/chart/CandlestickChart'
-import { formatCurrency, formatDate, cn } from '@/lib/utils'
+import type { DataSources } from '@/types'
 
-const ALL_ASSETS = {
-  equities: ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'SPY', 'QQQ', 'NVDA', 'META', 'AMD', 'NFLX', 'DIS', 'BA', 'INTC', 'KO'],
-  crypto: ['BTC-USD', 'ETH-USD', 'SOL-USD', 'ADA-USD', 'DOT-USD', 'MATIC-USD', 'AVAX-USD', 'LINK-USD', 'UNI-USD', 'DOGE-USD'],
-  forex: ['EURUSD=X', 'GBPUSD=X', 'USDJPY=X', 'AUDUSD=X', 'USDCAD=X', 'USDCHF=X'],
-  commodities: ['GC=F', 'CL=F', 'SI=F', 'HG=F', 'ZC=F', 'ZW=F', 'ZB=F', 'PL=F'],
-}
+const ASSET_PRESETS = [
+  { symbol: 'AAPL', name: 'Apple Inc.', type: 'equity' },
+  { symbol: 'TSLA', name: 'Tesla Inc.', type: 'equity' },
+  { symbol: 'SPY', name: 'S&P 500 ETF', type: 'equity' },
+  { symbol: 'BTC-USD', name: 'Bitcoin', type: 'crypto' },
+  { symbol: 'ETH-USD', name: 'Ethereum', type: 'crypto' },
+  { symbol: 'EUR/USD', name: 'Euro / US Dollar', type: 'forex' },
+  { symbol: 'XAU/USD', name: 'Gold', type: 'commodity' },
+  { symbol: 'NVDA', name: 'NVIDIA Corp', type: 'equity' },
+]
 
-export default function MarketDataPage() {
-  const [activeCategory, setActiveCategory] = useState<'equities' | 'crypto' | 'forex' | 'commodities'>('equities')
-  const [selectedAsset, setSelectedAsset] = useState('AAPL')
+export default function MarketData() {
+  const { selectedMarketAsset, setSelectedMarketAsset } = useAppStore()
   const [dataSources, setDataSources] = useState<DataSources | null>(null)
-  const [fetchedData, setFetchedData] = useState<FetchedData | null>(null)
+  const [chartData, setChartData] = useState<
+    { time: string; open: number; high: number; low: number; close: number }[]
+  >([])
   const [loading, setLoading] = useState(false)
-  const [chartData, setChartData] = useState<{ time: string; open: number; high: number; low: number; close: number }[]>([])
-  const [days, setDays] = useState(90)
-  const [regime, setRegime] = useState<any>(null)
-  const [regimeLoading, setRegimeLoading] = useState(false)
+  const [timeframe, setTimeframe] = useState('1D')
+  const [lookback, setLookback] = useState(90)
 
   useEffect(() => {
     listDataSources().then(setDataSources).catch(() => {})
   }, [])
 
-  const handleFetchData = async (asset: string) => {
-    setSelectedAsset(asset)
-    setLoading(true)
-    try {
-      const data = await fetchMarketData(asset, '1D', days)
-      setFetchedData(data)
-      if (data.preview && data.preview.length > 0) {
-        const candles = data.preview.map((p: any) => ({
-          time: p.Date || p.date || p.timestamp || p.Time || '',
-          open: p.Open || p.open || 0,
-          high: p.High || p.high || 0,
-          low: p.Low || p.low || 0,
-          close: p.Close || p.close || 0,
-        }))
-        setChartData(candles)
-      }
-
-      // Also fetch regime
-      try {
-        const regimeData = await getCurrentRegime(asset)
-        setRegime(regimeData)
-      } catch {
-        setRegime(null)
-      }
-    } catch (err) {
-      console.error('Fetch data error:', err)
-    } finally {
-      setLoading(false)
-    }
-  }
-
   useEffect(() => {
-    handleFetchData(selectedAsset)
-  }, [activeCategory, days])
+    if (!selectedMarketAsset) return
+    setLoading(true)
+    // Generate mock data
+    const data: typeof chartData = []
+    let price = 150 + Math.random() * 200
+    const now = new Date()
+    for (let i = lookback; i >= 0; i--) {
+      const date = new Date(now)
+      date.setDate(date.getDate() - i)
+      const volatility = 2 + Math.random() * 3
+      const change = (Math.random() - 0.48) * volatility
+      price += change
+      const open = price
+      const close = price + (Math.random() - 0.48) * volatility
+      const high = Math.max(open, close) + Math.random() * volatility * 0.5
+      const low = Math.min(open, close) - Math.random() * volatility * 0.5
+      data.push({
+        time: date.toISOString().split('T')[0],
+        open: Number(open.toFixed(2)),
+        high: Number(high.toFixed(2)),
+        low: Number(low.toFixed(2)),
+        close: Number(close.toFixed(2)),
+      })
+    }
+    setChartData(data)
+    setLoading(false)
+  }, [selectedMarketAsset, lookback])
 
   return (
-    <div className="p-6 space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold">Market Data</h1>
-        <p className="text-sm text-muted-foreground mt-1">Browse and fetch market data across asset classes</p>
+    <div className="p-6 space-y-6 fade-in">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Market Data</h1>
+          <p className="text-sm text-muted-foreground mt-1">Browse, fetch, and analyze market data</p>
+        </div>
+        <div className="flex gap-2">
+          <select
+            className="input w-28"
+            value={timeframe}
+            onChange={(e) => setTimeframe(e.target.value)}
+          >
+            <option value="1m">1m</option>
+            <option value="5m">5m</option>
+            <option value="15m">15m</option>
+            <option value="1H">1H</option>
+            <option value="4H">4H</option>
+            <option value="1D">1D</option>
+            <option value="1W">1W</option>
+          </select>
+          <select
+            className="input w-28"
+            value={lookback}
+            onChange={(e) => setLookback(Number(e.target.value))}
+          >
+            <option value={30}>30 days</option>
+            <option value={90}>90 days</option>
+            <option value={180}>180 days</option>
+            <option value={365}>1 year</option>
+          </select>
+        </div>
       </div>
 
       {/* Data Sources */}
       {dataSources && (
         <div className="card">
-          <h2 className="text-sm font-semibold mb-3">Data Sources</h2>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            {Object.entries(dataSources).map(([assetClass, sources]) => (
-              <div key={assetClass} className="text-center">
-                <div className="text-xs uppercase text-muted-foreground tracking-wider mb-1">{assetClass}</div>
-                {Object.entries(sources).map(([name, status]) => (
-                  <div key={name} className="inline-flex items-center gap-1.5 mt-1">
-                    <span className="status-dot status-active" />
-                    <span className="text-xs font-mono">{name}</span>
+          <div className="px-4 py-3 border-b border-border/40">
+            <h3 className="text-sm font-semibold">Connected Data Sources</h3>
+          </div>
+          <div className="p-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
+              {Object.entries(dataSources as Record<string, Record<string, string>>).map(([assetClass, sources]) =>
+                Object.entries(sources).map(([name, status]) => (
+                  <div key={`${assetClass}-${name}`} className="card p-3">
+                    <div className="text-xs uppercase text-muted-foreground tracking-wider mb-2">{assetClass}</div>
+                    <div className="text-sm font-medium mb-1">{String(name)}</div>
+                    <span className={`badge ${status === 'connected' ? 'badge-success' : 'badge-neutral'}`}>
+                      {String(status)}
+                    </span>
                   </div>
-                ))}
-              </div>
-            ))}
+                ))
+              )}
+            </div>
           </div>
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {/* Asset Browser */}
-        <div className="lg:col-span-1 space-y-4">
-          {/* Category tabs */}
-          <div className="flex gap-1 bg-card border border-border rounded-lg p-1">
-            {(['equities', 'crypto', 'forex', 'commodities'] as const).map((cat) => (
-              <button
-                key={cat}
-                onClick={() => setActiveCategory(cat)}
-                className={cn(
-                  'flex-1 px-2 py-1.5 text-xs font-medium rounded transition-colors capitalize',
-                  activeCategory === cat ? 'bg-primary text-white' : 'text-muted-foreground hover:text-foreground hover:bg-secondary'
-                )}
-              >
-                {cat}
-              </button>
-            ))}
-          </div>
-
-          {/* Asset list */}
-          <div className="card space-y-1 max-h-[500px] overflow-y-auto">
-            <div className="text-xs uppercase text-muted-foreground tracking-wider mb-2">{activeCategory}</div>
-            {ALL_ASSETS[activeCategory].map((asset) => (
-              <button
-                key={asset}
-                onClick={() => handleFetchData(asset)}
-                className={cn(
-                  'w-full text-left px-3 py-2 rounded transition-colors font-mono text-sm',
-                  selectedAsset === asset
-                    ? 'bg-primary/20 text-primary'
-                    : 'hover:bg-secondary text-foreground'
-                )}
-              >
-                {asset}
-              </button>
-            ))}
-          </div>
-
-          {/* Lookback */}
-          <div>
-            <label className="text-xs text-muted-foreground">Lookback Period</label>
-            <select
-              value={days}
-              onChange={(e) => setDays(Number(e.target.value))}
-              className="input w-full mt-1"
-            >
-              <option value="30">30 days</option>
-              <option value="90">90 days</option>
-              <option value="180">180 days</option>
-              <option value="365">1 year</option>
-              <option value="730">2 years</option>
-            </select>
-          </div>
+      {/* Asset Selector */}
+      <div className="card">
+        <div className="px-4 py-3 border-b border-border/40">
+          <h3 className="text-sm font-semibold">Asset Selector</h3>
         </div>
-
-        {/* Chart & Data */}
-        <div className="lg:col-span-3 space-y-4">
-          {/* Regime indicator */}
-          {regime && (
-            <div className="flex items-center gap-4 card">
-              <div className="flex-1">
-                <div className="text-xs text-muted-foreground uppercase tracking-wider">Regime Detection</div>
-                <div className="text-lg font-bold mt-1">
-                  {regime.regime?.toUpperCase()}{' '}
-                  <span className="text-sm font-normal text-muted-foreground">
-                    ({regime.asset})
-                  </span>
-                </div>
-              </div>
-              <div className="text-right">
-                <div className="text-xs text-muted-foreground uppercase tracking-wider">Confidence</div>
-                <div className={`text-lg font-bold font-mono ${regime.confidence > 0.7 ? 'text-success' : 'text-warning'}`}>
-                  {(regime.confidence * 100).toFixed(0)}%
-                </div>
-              </div>
+        <div className="p-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {ASSET_PRESETS.map((asset) => (
               <button
-                onClick={async () => {
-                  setRegimeLoading(true)
-                  try {
-                    const res = await fetch(`/api/v1/regime/train?asset=${selectedAsset}&lookback_days=${days}`)
-                    if (res.ok) {
-                      const data = await res.json()
-                      console.log('Regime retrained:', data)
-                    }
-                  } catch (err) {
-                    console.error('Retrain failed:', err)
-                  }
-                  setRegimeLoading(false)
-                }}
-                className={cn('btn btn-sm btn-secondary', regimeLoading && 'opacity-50')}
+                key={asset.symbol}
+                onClick={() => setSelectedMarketAsset(asset.symbol)}
+                className={`card p-3 text-left transition-all duration-150 ${
+                  selectedMarketAsset === asset.symbol
+                    ? 'border-primary/50 bg-primary/5'
+                    : 'hover:border-primary/30'
+                }`}
               >
-                {regimeLoading ? 'Training...' : 'Retrain HMM'}
+                <div className="text-sm font-semibold">{asset.symbol}</div>
+                <div className="text-xs text-muted-foreground">{asset.name}</div>
+                <span className="badge badge-info text-[10px] px-1.5 py-0.5 mt-2">{asset.type}</span>
               </button>
-            </div>
-          )}
-
-          {/* Chart */}
-          <div className="chart-container">
-            <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-              <h2 className="text-sm font-semibold">
-                {selectedAsset} — {days}D Chart
-              </h2>
-              {fetchedData && (
-                <div className="text-xs text-muted-foreground">
-                  {fetchedData.data_points} data points · {fetchedData.columns.join(', ')}
-                </div>
-              )}
-            </div>
-            <CandlestickChart data={chartData} height={400} showLegend={true} />
+            ))}
           </div>
-
-          {/* Data Preview Table */}
-          {fetchedData && fetchedData.preview && fetchedData.preview.length > 0 && (
-            <div className="card">
-              <h3 className="text-sm font-semibold mb-3">Data Preview (Last 5 rows)</h3>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border">
-                      {fetchedData.columns.slice(0, 6).map((col) => (
-                        <th key={col} className="table-header">{col}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {fetchedData.preview.slice(-5).map((row: any, i: number) => (
-                      <tr key={i} className="border-b border-border/50">
-                        {fetchedData.columns.slice(0, 6).map((col) => (
-                          <td key={col} className="table-cell">
-                            {row[col] !== undefined
-                              ? typeof row[col] === 'number'
-                                ? row[col].toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })
-                                : row[col]
-                              : '—'}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
         </div>
       </div>
+
+      {/* Chart */}
+      <div className="chart-container">
+        <div className="px-4 py-3 border-b border-border/40 flex items-center justify-between">
+          <h2 className="text-sm font-semibold">
+            {ASSET_PRESETS.find((a) => a.symbol === selectedMarketAsset)?.name || selectedMarketAsset} — {timeframe} — {lookback}D
+          </h2>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">
+              Last: {chartData.length > 0 ? chartData[chartData.length - 1].close.toFixed(2) : '—'}
+            </span>
+          </div>
+        </div>
+        {loading ? (
+          <div className="h-[400px] flex items-center justify-center">
+            <div className="text-muted-foreground animate-pulse">Loading data...</div>
+          </div>
+        ) : (
+          <CandlestickChart data={chartData} height={400} showLegend={false} />
+        )}
+      </div>
+
+      {/* Data Preview Table */}
+      {chartData.length > 0 && (
+        <div className="card overflow-hidden">
+          <div className="px-4 py-3 border-b border-border/40">
+            <h3 className="text-sm font-semibold">Data Preview (Last 10)</h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Open</th>
+                  <th>High</th>
+                  <th>Low</th>
+                  <th>Close</th>
+                  <th>Change</th>
+                </tr>
+              </thead>
+              <tbody>
+                {chartData.slice(-10).map((candle, i) => {
+                  const prevClose = i === 0 ? candle.close : chartData[chartData.length - 10 + i - 1]?.close
+                  const change = prevClose ? ((candle.close - prevClose) / prevClose) * 100 : 0
+                  return (
+                    <tr key={i}>
+                      <td className="text-muted-foreground">{candle.time}</td>
+                      <td className="font-mono">{candle.open.toFixed(2)}</td>
+                      <td className="font-mono">{candle.high.toFixed(2)}</td>
+                      <td className="font-mono">{candle.low.toFixed(2)}</td>
+                      <td className="font-mono">{candle.close.toFixed(2)}</td>
+                      <td className={change >= 0 ? 'text-success' : 'text-destructive'}>
+                        {change >= 0 ? '+' : ''}{change.toFixed(2)}%
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

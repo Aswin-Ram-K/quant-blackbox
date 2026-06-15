@@ -1,36 +1,21 @@
-import { Routes, Route, useNavigate, useLocation } from 'react-router-dom'
-import { useAppStore } from '@/store/appStore'
-import DashboardPage from '@/pages/Dashboard'
-import StrategyBuilderPage from '@/pages/StrategyBuilder'
-import BacktestPage from '@/pages/Backtest'
-import PaperTradingPage from '@/pages/PaperTrading'
-import MarketDataPage from '@/pages/MarketData'
-import AnalyticsPage from '@/pages/Analytics'
+import { Routes, Route } from 'react-router-dom'
+import { useAppStore, NAV_ITEMS } from '@/store/appStore'
+import HomeDashboard from '@/pages/HomeDashboard'
+import StrategiesBuilder from '@/pages/StrategiesBuilder'
+import Logbook from '@/pages/Logbook'
+import MarketData from '@/pages/MarketData'
 
 export default function App() {
-  const { activeTab, setActiveTab } = useAppStore()
-  const navigate = useNavigate()
-  const location = useLocation()
-
-  const handleNavigate = (path: string) => {
-    navigate(path)
-    setActiveTab(path === '/' ? 'dashboard' : path.slice(1))
-  }
-
-  // Set active tab from URL on mount
-  const tabMap: Record<string, string> = { '/': 'dashboard', '/strategy': 'strategy', '/backtest': 'backtest', '/paper': 'paper', '/market': 'market', '/analytics': 'analytics' }
-  if (tabMap[location.pathname] && tabMap[location.pathname] !== activeTab) {
-    setActiveTab(tabMap[location.pathname])
-  }
+  const { activePage, setActivePage } = useAppStore()
 
   return (
     <div className="flex h-screen bg-background overflow-hidden">
       {/* Sidebar */}
-      <aside className="w-56 min-w-[14rem] bg-card border-r border-border flex flex-col">
+      <aside className="w-56 min-w-[14rem] bg-card border-r border-border flex flex-col transition-all duration-200">
         {/* Logo */}
         <div className="p-4 border-b border-border">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-white font-bold text-sm">
+            <div className="w-9 h-9 rounded-lg bg-primary/20 border border-primary/30 flex items-center justify-center text-primary font-bold">
               ◈
             </div>
             <div>
@@ -41,19 +26,14 @@ export default function App() {
         </div>
 
         {/* Nav items */}
-        <nav className="flex-1 p-3 space-y-1">
-          {[
-            { id: 'dashboard', label: 'Dashboard', icon: '⬡' },
-            { id: 'strategy', label: 'Strategy Builder', icon: '⟁' },
-            { id: 'backtest', label: 'Backtest', icon: '◷' },
-            { id: 'paper', label: 'Paper Trading', icon: '◈' },
-            { id: 'market', label: 'Market Data', icon: '◉' },
-            { id: 'analytics', label: 'Analytics', icon: '◧' },
-          ].map((item) => (
+        <nav className="flex-1 p-2 space-y-0.5">
+          {NAV_ITEMS.map((item) => (
             <button
               key={item.id}
-              onClick={() => handleNavigate(`/${item.id === 'dashboard' ? '' : item.id}`)}
-              className={`sidebar-item w-full text-left justify-start ${activeTab === item.id ? 'sidebar-item-active' : ''}`}
+              onClick={() => setActivePage(item.id)}
+              className={`sidebar-item w-full text-left justify-start ${
+                activePage === item.id ? 'sidebar-item-active' : ''
+              }`}
             >
               <span className="text-base w-5 text-center">{item.icon}</span>
               <span>{item.label}</span>
@@ -64,7 +44,7 @@ export default function App() {
         {/* Footer status */}
         <div className="p-3 border-t border-border">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span className="status-dot status-active" />
+            <span className="status-dot status-active pulse-slow" />
             <span>System Online</span>
           </div>
         </div>
@@ -73,12 +53,11 @@ export default function App() {
       {/* Main content */}
       <main className="flex-1 overflow-y-auto">
         <Routes>
-          <Route path="/" element={<DashboardPage />} />
-          <Route path="/strategy" element={<StrategyBuilderPage />} />
-          <Route path="/backtest" element={<BacktestPage />} />
-          <Route path="/paper" element={<PaperTradingPage />} />
-          <Route path="/market" element={<MarketDataPage />} />
-          <Route path="/analytics" element={<AnalyticsPage />} />
+          <Route path="/" element={<HomeDashboard />} />
+          <Route path="/strategies" element={<StrategiesBuilder />} />
+          <Route path="/logbook" element={<Logbook />} />
+          <Route path="/markets" element={<MarketData />} />
+          <Route path="*" element={<HomeDashboard />} />
         </Routes>
       </main>
     </div>

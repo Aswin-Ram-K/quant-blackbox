@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react'
 import { createChart, ColorType, CrosshairMode } from 'lightweight-charts'
+import type { CandlestickSeries, LineSeries, IChartApi } from 'lightweight-charts'
 
 interface CandlestickChartProps {
   data: { time: string; open: number; high: number; low: number; close: number }[]
@@ -9,11 +10,17 @@ interface CandlestickChartProps {
   showLegend?: boolean
 }
 
-export default function CandlestickChart({ data, equityCurve, equityCurveLabel = 'Equity', height = 400, showLegend = true }: CandlestickChartProps) {
+export default function CandlestickChart({
+  data,
+  equityCurve,
+  equityCurveLabel = 'Equity',
+  height = 400,
+  showLegend = true,
+}: CandlestickChartProps) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const chartRef = useRef<any>(null)
-  const equityRef = useRef<any>(null)
-  const chartInstanceRef = useRef<any>(null)
+  const chartRef = useRef<ReturnType<typeof createChart> | null>(null)
+  const candleSeriesRef = useRef<SeriesTypes.Candlestick | null>(null)
+  const lineSeriesRef = useRef<SeriesTypes.Line | null>(null)
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -27,20 +34,20 @@ export default function CandlestickChart({ data, equityCurve, equityCurveLabel =
         fontSize: 12,
       },
       grid: {
-        vertLines: { color: 'rgba(100, 100, 120, 0.15)' },
-        horzLines: { color: 'rgba(100, 100, 120, 0.15)' },
+        vertLines: { color: 'rgba(100, 100, 120, 0.12)' },
+        horzLines: { color: 'rgba(100, 100, 120, 0.12)' },
       },
       crosshair: {
         mode: CrosshairMode.Normal,
-        vertLine: { color: 'rgba(48, 133, 214, 0.5)', style: 2, labelBackgroundColor: '#3085d6' },
-        horzLine: { color: 'rgba(48, 133, 214, 0.5)', style: 2, labelBackgroundColor: '#3085d6' },
+        vertLine: { color: 'rgba(48, 133, 214, 0.4)', style: 2, labelBackgroundColor: '#3085d6' },
+        horzLine: { color: 'rgba(48, 133, 214, 0.4)', style: 2, labelBackgroundColor: '#3085d6' },
       },
       rightPriceScale: {
-        borderColor: 'rgba(100, 100, 120, 0.3)',
-        scaleMargins: { top: 0.1, bottom: 0.1 },
+        borderColor: 'rgba(100, 100, 120, 0.25)',
+        scaleMargins: { top: 0.05, bottom: 0.05 },
       },
       timeScale: {
-        borderColor: 'rgba(100, 100, 120, 0.3)',
+        borderColor: 'rgba(100, 100, 120, 0.25)',
         timeVisible: true,
         secondsVisible: false,
       },
@@ -48,9 +55,9 @@ export default function CandlestickChart({ data, equityCurve, equityCurveLabel =
       handleScale: true,
     })
 
-    chartInstanceRef.current = chart
+    chartRef.current = chart
 
-    const candlestickSeries = chart.addCandlestickSeries({
+    const candleSeries = chart.addCandlestickSeries({
       upColor: '#22c55e',
       downColor: '#ef4444',
       borderUpColor: '#22c55e',
@@ -59,20 +66,22 @@ export default function CandlestickChart({ data, equityCurve, equityCurveLabel =
       wickDownColor: '#ef4444',
     })
 
-    chartRef.current = candlestickSeries
+    candleSeriesRef.current = candleSeries
 
     if (data.length > 0) {
-      candlestickSeries.setData(data)
+      candleSeries.setData(data)
     }
 
-    // Add equity curve overlay if provided
+    // Add equity curve overlay
     if (equityCurve && equityCurve.length > 0) {
-      const equityData = equityCurve.map((val, i) => {
-        if (i < data.length) {
-          return { time: data[i].time, value: val }
-        }
-        return null
-      }).filter(Boolean) as { time: string; value: number }[]
+      const equityData = equityCurve
+        .map((val, i) => {
+          if (i < data.length) {
+            return { time: data[i].time, value: val }
+          }
+          return null
+        })
+        .filter(Boolean) as { time: string; value: number }[]
 
       if (equityData.length > 0) {
         const lineSeries = chart.addLineSeries({
@@ -83,22 +92,24 @@ export default function CandlestickChart({ data, equityCurve, equityCurveLabel =
           lastValueVisible: true,
           priceLineVisible: false,
         })
-        equityRef.current = lineSeries
+        lineSeriesRef.current = lineSeries
         lineSeries.setData(equityData)
       }
     }
 
     return () => {
       chart.remove()
-      chartInstanceRef.current = null
+      chartRef.current = null
     }
   }, [data, equityCurve, height, equityCurveLabel])
 
   // Resize on window change
   useEffect(() => {
     const handleResize = () => {
-      if (containerRef.current && chartInstanceRef.current) {
-        chartInstanceRef.current.applyOptions({ width: containerRef.current.clientWidth })
+      if (containerRef.current && chartRef.current) {
+        chartRef.current.applyOptions({
+          width: containerRef.current.clientWidth,
+        })
       }
     }
     window.addEventListener('resize', handleResize)
@@ -108,17 +119,15 @@ export default function CandlestickChart({ data, equityCurve, equityCurveLabel =
   return (
     <div className="w-full">
       {showLegend && equityCurve && equityCurve.length > 0 && (
-        <div className="flex items-center gap-4 px-4 py-2 border-b border-border bg-card/50">
+        <div className="flex items-center gap-4 px-4 py-2 border-b border-border/40 bg-card/30">
           <div className="flex items-center gap-1.5">
             <div className="w-3 h-0.5 bg-green-500 rounded" />
             <span className="text-xs text-muted-foreground">Price</span>
           </div>
-          {equityCurve && (
-            <div className="flex items-center gap-1.5">
-              <div className="w-3 h-0.5 bg-blue-500 rounded" />
-              <span className="text-xs text-muted-foreground">{equityCurveLabel}</span>
-            </div>
-          )}
+          <div className="flex items-center gap-1.5">
+            <div className="w-3 h-0.5 bg-blue-500 rounded" />
+            <span className="text-xs text-muted-foreground">{equityCurveLabel}</span>
+          </div>
         </div>
       )}
       <div ref={containerRef} className="lightweight-chart" />
